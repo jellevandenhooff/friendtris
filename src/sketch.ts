@@ -1,5 +1,5 @@
 import p5 from "p5";
-import { PLAYER_1, SYSTEM } from "@rcade/plugin-input-classic";
+import { PLAYER_1, PLAYER_2, SYSTEM } from "@rcade/plugin-input-classic";
 import {
     TETROMINOS,
     COLORS,
@@ -41,6 +41,13 @@ const sketch = (p: p5) => {
     let prevA = false;
     let prevB = false;
 
+    // Player 2 sabotage controls
+    // pieceMode: -1 = random, 0-6 = fixed piece type
+    let pieceMode = -1;
+    let prevP2Up = false;
+    let prevP2Down = false;
+    let isMultiplayer = false;
+
     function getFallSpeed(): number {
         return Math.max(100, 800 - (level - 1) * 70);
     }
@@ -49,9 +56,16 @@ const sketch = (p: p5) => {
         return Array.from({ length: ROWS }, () => Array(COLS).fill(0));
     }
 
+    function getNextPieceType(): number {
+        if (pieceMode === -1) {
+            return Math.floor(p.random(TETROMINOS.length));
+        }
+        return pieceMode;
+    }
+
     function spawnPiece(): Piece {
         const type = nextPiece;
-        nextPiece = Math.floor(p.random(TETROMINOS.length));
+        nextPiece = getNextPieceType();
         const shape = getShape(type, 0);
         return {
             type,
@@ -196,6 +210,16 @@ const sketch = (p: p5) => {
                 }
             }
         }
+
+        // Mode indicator next to shape (multiplayer only)
+        if (isMultiplayer) {
+            p.fill(150);
+            p.textSize(8);
+            p.textAlign(p.LEFT, p.CENTER);
+            const indicatorX = previewX + 45;
+            const indicatorY = previewY + 15;
+            p.text(pieceMode === -1 ? "(random)" : "(fixed)", indicatorX, indicatorY);
+        }
     }
 
     function drawUI(): void {
@@ -225,27 +249,68 @@ const sketch = (p: p5) => {
         p.fill(255);
         p.textSize(24);
         p.textAlign(p.CENTER, p.CENTER);
-        p.text("FRIENDTRIS", WIDTH / 2, HEIGHT / 2 - 30);
-        p.textSize(12);
-        p.text("Press P1", WIDTH / 2, HEIGHT / 2 + 10);
+        p.text("FRIENDTRIS", WIDTH / 2, 50);
+
+        // P1 Controls
+        p.fill(255);
         p.textSize(10);
-        p.text("LEFT/RIGHT: Move  DOWN: Soft drop", WIDTH / 2, HEIGHT / 2 + 40);
-        p.text("UP: Hard drop  A/B: Rotate", WIDTH / 2, HEIGHT / 2 + 55);
+        const ctrlY = 100;
+        p.textAlign(p.RIGHT, p.CENTER);
+        p.text("MOVE", WIDTH / 2 - 10, ctrlY);
+        p.text("SOFT DROP", WIDTH / 2 - 10, ctrlY + 18);
+        p.text("HARD DROP", WIDTH / 2 - 10, ctrlY + 36);
+        p.text("ROTATE", WIDTH / 2 - 10, ctrlY + 54);
+
+        p.fill(150);
+        p.textAlign(p.LEFT, p.CENTER);
+        p.text("LEFT / RIGHT", WIDTH / 2 + 10, ctrlY);
+        p.text("DOWN", WIDTH / 2 + 10, ctrlY + 18);
+        p.text("UP", WIDTH / 2 + 10, ctrlY + 36);
+        p.text("A / B", WIDTH / 2 + 10, ctrlY + 54);
+
+        p.fill(255);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.textSize(12);
+        p.text("P1 / P2 to start", WIDTH / 2, 200);
     }
 
     function drawGameOver(): void {
-        p.fill(0, 0, 0, 180);
+        p.fill(0, 0, 0, 200);
         p.noStroke();
         p.rect(0, 0, WIDTH, HEIGHT);
 
         p.fill(255);
         p.textSize(20);
         p.textAlign(p.CENTER, p.CENTER);
-        p.text("GAME OVER", WIDTH / 2, HEIGHT / 2 - 20);
+        p.text("GAME OVER", WIDTH / 2, 50);
+
         p.textSize(14);
-        p.text("Score: " + score, WIDTH / 2, HEIGHT / 2 + 10);
+        p.text("Score: " + score, WIDTH / 2, 90);
+        p.fill(150);
         p.textSize(10);
-        p.text("Press P1 to retry", WIDTH / 2, HEIGHT / 2 + 40);
+        p.text("Lines: " + lines + "  Level: " + level, WIDTH / 2, 110);
+
+        // P1 Controls (same as start screen)
+        p.fill(255);
+        p.textSize(10);
+        const ctrlY = 150;
+        p.textAlign(p.RIGHT, p.CENTER);
+        p.text("MOVE", WIDTH / 2 - 10, ctrlY);
+        p.text("SOFT DROP", WIDTH / 2 - 10, ctrlY + 18);
+        p.text("HARD DROP", WIDTH / 2 - 10, ctrlY + 36);
+        p.text("ROTATE", WIDTH / 2 - 10, ctrlY + 54);
+
+        p.fill(150);
+        p.textAlign(p.LEFT, p.CENTER);
+        p.text("LEFT / RIGHT", WIDTH / 2 + 10, ctrlY);
+        p.text("DOWN", WIDTH / 2 + 10, ctrlY + 18);
+        p.text("UP", WIDTH / 2 + 10, ctrlY + 36);
+        p.text("A / B", WIDTH / 2 + 10, ctrlY + 54);
+
+        p.fill(255);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.textSize(12);
+        p.text("P1 / P2 to start", WIDTH / 2, 235);
     }
 
     function resetGame(): void {
@@ -254,7 +319,8 @@ const sketch = (p: p5) => {
         lines = 0;
         level = 1;
         gameOver = false;
-        nextPiece = Math.floor(p.random(TETROMINOS.length));
+        pieceMode = -1;
+        nextPiece = getNextPieceType();
         currentPiece = spawnPiece();
         lastFall = p.millis();
     }
@@ -262,7 +328,7 @@ const sketch = (p: p5) => {
     p.setup = () => {
         p.createCanvas(WIDTH, HEIGHT);
         board = createBoard();
-        nextPiece = Math.floor(p.random(TETROMINOS.length));
+        nextPiece = getNextPieceType();
     };
 
     p.draw = () => {
@@ -272,8 +338,9 @@ const sketch = (p: p5) => {
         // Start screen
         if (!gameStarted) {
             drawStartScreen();
-            if (SYSTEM.ONE_PLAYER) {
+            if (SYSTEM.ONE_PLAYER || SYSTEM.TWO_PLAYER) {
                 gameStarted = true;
+                isMultiplayer = SYSTEM.TWO_PLAYER;
                 resetGame();
             }
             return;
@@ -282,12 +349,20 @@ const sketch = (p: p5) => {
         // Game over screen
         if (gameOver) {
             drawBoard();
-            drawUI();
             drawNextPiece();
+            drawUI();
             drawGameOver();
-            if (SYSTEM.ONE_PLAYER) {
+            if (SYSTEM.ONE_PLAYER || SYSTEM.TWO_PLAYER) {
+                isMultiplayer = SYSTEM.TWO_PLAYER;
                 resetGame();
             }
+            return;
+        }
+
+        // Restart during gameplay
+        if (SYSTEM.ONE_PLAYER || SYSTEM.TWO_PLAYER) {
+            isMultiplayer = SYSTEM.TWO_PLAYER;
+            resetGame();
             return;
         }
 
@@ -369,10 +444,28 @@ const sketch = (p: p5) => {
             }
         }
 
+        // Player 2 sabotage: up/down to change piece mode (multiplayer only)
+        if (isMultiplayer) {
+            if (PLAYER_2.DPAD.up && !prevP2Up) {
+                pieceMode++;
+                if (pieceMode > 6) pieceMode = -1;
+                // Immediately affect the next piece
+                nextPiece = getNextPieceType();
+            }
+            if (PLAYER_2.DPAD.down && !prevP2Down) {
+                pieceMode--;
+                if (pieceMode < -1) pieceMode = 6;
+                // Immediately affect the next piece
+                nextPiece = getNextPieceType();
+            }
+        }
+
         // Update previous input state
         prevUp = PLAYER_1.DPAD.up;
         prevA = PLAYER_1.A;
         prevB = PLAYER_1.B;
+        prevP2Up = PLAYER_2.DPAD.up;
+        prevP2Down = PLAYER_2.DPAD.down;
 
         // Draw everything
         drawBoard();
