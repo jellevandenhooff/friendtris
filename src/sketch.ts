@@ -1,6 +1,5 @@
 import p5 from "p5";
 import { PLAYER_1, PLAYER_2, SYSTEM } from "@rcade/plugin-input-classic";
-import { PLAYER_2 as PLAYER_2_SPINNER } from "@rcade/plugin-input-spinners";
 import {
     TETROMINOS,
     COLORS,
@@ -14,26 +13,41 @@ const WIDTH = 336;
 const HEIGHT = 262;
 
 // Board dimensions
-const COLS = 10;
 const ROWS = 20;
-const CELL_SIZE = 12;
+const COLS_SINGLE = 10;
+const COLS_MULTI = 20;
+const CELL_SIZE_SINGLE = 12;
+const CELL_SIZE_MULTI = 10;
 const BOARD_X = 20;
 const BOARD_Y = 10;
 
 const sketch = (p: p5) => {
     let board: number[][] = [];
     let currentPiece: Piece | null = null;
+    let currentPiece2: Piece | null = null; // P2's piece
     let nextPiece: number = 0;
     let score = 0;
-    let lines = 0;
+    let lines = 20; // Lines remaining until next level
     let level = 1;
+    const LINES_PER_LEVEL = 20;
     let gameOver = false;
     let gameStarted = false;
+    let isMultiplayer = false;
 
-    // Timing
+    // Dynamic board dimensions
+    let cols = COLS_SINGLE;
+    let cellSize = CELL_SIZE_SINGLE;
+
+    // Timing for P1
     let lastFall = 0;
     let lastMove = 0;
     let lastRotate = 0;
+
+    // Timing for P2
+    let lastFall2 = 0;
+    let lastMove2 = 0;
+    let lastRotate2 = 0;
+
     const moveDelay = 100;
     const rotateDelay = 150;
 
@@ -41,30 +55,9 @@ const sketch = (p: p5) => {
     let prevUp = false;
     let prevA = false;
     let prevB = false;
-
-    // Player 2 sabotage controls
-    // pieceMode: -1 = random, 0-6 = fixed piece type
-    let pieceMode = -1;
     let prevP2Up = false;
-    let prevP2Down = false;
-    let prevP2Left = false;
-    let prevP2Right = false;
     let prevP2A = false;
     let prevP2B = false;
-    let isMultiplayer = false;
-
-    // P2 mode: "pieces" = change next piece, "draw" = toggle cells, "garbage" = add garbage rows, "speed" = control fall speed
-    let p2Mode: "pieces" | "draw" | "garbage" | "speed" = "pieces";
-    let p2CursorX = Math.floor(COLS / 2);
-    let p2CursorY = Math.floor(ROWS / 2);
-    let spinnerAccumulator = 0;
-    const SPINNER_THRESHOLD = 16; // Steps needed to trigger mode change
-
-    // P2 speed control (0.5x to 10x, default 1x)
-    let speedMultiplier = 1.0;
-    const SPEED_MIN = 0.5;
-    const SPEED_MAX = 10.0;
-    const SPEED_STEP = 0.5;
 
     // Demo mode state (for attract screen)
     let demoBoard: number[][] = [];
@@ -74,31 +67,40 @@ const sketch = (p: p5) => {
     const DEMO_FALL_SPEED = 150;
 
     function getFallSpeed(): number {
-        const baseSpeed = Math.max(100, 800 - (level - 1) * 70);
-        return baseSpeed / speedMultiplier;
+        // Base speed divided by level (1x, 2x, 3x, ...)
+        return Math.max(50, 800 / level);
     }
 
-    function createBoard(): number[][] {
-        return Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    function createBoard(numCols: number): number[][] {
+        return Array.from({ length: ROWS }, () => Array(numCols).fill(0));
     }
 
-    function getNextPieceType(): number {
-        if (pieceMode === -1) {
-            return Math.floor(p.random(TETROMINOS.length));
-        }
-        return pieceMode;
+    function getRandomPieceType(): number {
+        return Math.floor(p.random(TETROMINOS.length));
     }
 
-    function spawnPiece(): Piece {
+    function spawnPiece(spawnX: number): Piece {
         const type = nextPiece;
-        nextPiece = getNextPieceType();
+        nextPiece = getRandomPieceType();
         const shape = getShape(type, 0);
         return {
             type,
             rotation: 0,
-            x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2),
+            x: spawnX - Math.floor(shape[0].length / 2),
             y: 0,
         };
+    }
+
+    function spawnPieceP1(): Piece {
+        // P1 spawns in left half (or center in single player)
+        const spawnX = isMultiplayer ? Math.floor(cols / 4) : Math.floor(cols / 2);
+        return spawnPiece(spawnX);
+    }
+
+    function spawnPieceP2(): Piece {
+        // P2 spawns in right half
+        const spawnX = Math.floor((cols * 3) / 4);
+        return spawnPiece(spawnX);
     }
 
     function collides(piece: Piece, dx: number, dy: number): boolean {
@@ -108,7 +110,7 @@ const sketch = (p: p5) => {
                 if (shape[row][col]) {
                     const newX = piece.x + col + dx;
                     const newY = piece.y + row + dy;
-                    if (newX < 0 || newX >= COLS || newY >= ROWS) {
+                    if (newX < 0 || newX >= cols || newY >= ROWS) {
                         return true;
                     }
                     if (newY >= 0 && board[newY][newX]) {
@@ -120,15 +122,15 @@ const sketch = (p: p5) => {
         return false;
     }
 
-    function lockPiece(piece: Piece): void {
+    function lockPiece(piece: Piece, colorIndex?: number): void {
         const shape = getShape(piece.type, piece.rotation);
         for (let row = 0; row < shape.length; row++) {
             for (let col = 0; col < shape[row].length; col++) {
                 if (shape[row][col]) {
                     const boardY = piece.y + row;
                     const boardX = piece.x + col;
-                    if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS) {
-                        board[boardY][boardX] = piece.type + 1;
+                    if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < cols) {
+                        board[boardY][boardX] = colorIndex ?? (piece.type + 1);
                     }
                 }
             }
@@ -140,7 +142,7 @@ const sketch = (p: p5) => {
         for (let row = ROWS - 1; row >= 0; row--) {
             if (board[row].every((cell) => cell !== 0)) {
                 board.splice(row, 1);
-                board.unshift(Array(COLS).fill(0));
+                board.unshift(Array(cols).fill(0));
                 cleared++;
                 row++;
             }
@@ -150,21 +152,25 @@ const sketch = (p: p5) => {
 
     function updateScore(linesCleared: number): void {
         const points = [0, 100, 300, 500, 800];
-        score += points[linesCleared] * level;
-        lines += linesCleared;
-        level = Math.floor(lines / 10) + 1;
+        score += points[Math.min(linesCleared, 4)] * level;
+        lines -= linesCleared;
+        // Level up when lines reach 0
+        while (lines <= 0) {
+            level++;
+            lines += LINES_PER_LEVEL;
+        }
     }
 
     function drawCell(x: number, y: number, colorIndex: number, mode: "normal" | "active" | "ghost" = "normal"): void {
         const baseColor = COLORS[colorIndex];
-        const px = BOARD_X + x * CELL_SIZE;
-        const py = BOARD_Y + y * CELL_SIZE;
+        const px = BOARD_X + x * cellSize;
+        const py = BOARD_Y + y * cellSize;
 
         if (mode === "ghost") {
             p.noFill();
             p.stroke(baseColor[0], baseColor[1], baseColor[2], 100);
             p.strokeWeight(1);
-            p.rect(px + 1, py + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+            p.rect(px + 1, py + 1, cellSize - 2, cellSize - 2);
         } else {
             // Active pieces are brighter
             const brightness = mode === "active" ? 1.3 : 1.0;
@@ -175,11 +181,11 @@ const sketch = (p: p5) => {
             ];
             p.fill(color[0], color[1], color[2]);
             p.noStroke();
-            p.rect(px, py, CELL_SIZE - 1, CELL_SIZE - 1);
+            p.rect(px, py, cellSize - 1, cellSize - 1);
             // Highlight
             p.fill(255, 255, 255, mode === "active" ? 80 : 50);
-            p.rect(px, py, CELL_SIZE - 1, 2);
-            p.rect(px, py, 2, CELL_SIZE - 1);
+            p.rect(px, py, cellSize - 1, 2);
+            p.rect(px, py, 2, cellSize - 1);
         }
     }
 
@@ -188,11 +194,19 @@ const sketch = (p: p5) => {
         p.stroke(80, 80, 120);
         p.strokeWeight(2);
         p.noFill();
-        p.rect(BOARD_X - 2, BOARD_Y - 2, COLS * CELL_SIZE + 3, ROWS * CELL_SIZE + 3);
+        p.rect(BOARD_X - 2, BOARD_Y - 2, cols * cellSize + 3, ROWS * cellSize + 3);
+
+        // Draw center line in multiplayer
+        if (isMultiplayer) {
+            p.stroke(60, 60, 90);
+            p.strokeWeight(1);
+            const centerX = BOARD_X + (cols / 2) * cellSize;
+            p.line(centerX, BOARD_Y, centerX, BOARD_Y + ROWS * cellSize);
+        }
 
         // Draw cells
         for (let row = 0; row < ROWS; row++) {
-            for (let col = 0; col < COLS; col++) {
+            for (let col = 0; col < cols; col++) {
                 drawCell(col, row, board[row][col]);
             }
         }
@@ -222,24 +236,8 @@ const sketch = (p: p5) => {
         }
     }
 
-    function drawP2Cursor(): void {
-        if (!isMultiplayer || p2Mode !== "draw") return;
-
-        const px = BOARD_X + p2CursorX * CELL_SIZE;
-        const py = BOARD_Y + p2CursorY * CELL_SIZE;
-
-        // Blinking cursor
-        const blink = Math.floor(p.millis() / 200) % 2 === 0;
-        if (blink) {
-            p.noFill();
-            p.stroke(255, 100, 100);
-            p.strokeWeight(2);
-            p.rect(px - 1, py - 1, CELL_SIZE + 1, CELL_SIZE + 1);
-        }
-    }
-
     function drawNextPiece(): void {
-        const previewX = BOARD_X + COLS * CELL_SIZE + 25;
+        const previewX = BOARD_X + cols * cellSize + 15;
         const previewY = 30;
 
         p.fill(255);
@@ -259,69 +257,10 @@ const sketch = (p: p5) => {
                 }
             }
         }
-
-        // P2 UI on the right (multiplayer only)
-        if (isMultiplayer) {
-            const rightX = WIDTH - 10;
-            p.textAlign(p.RIGHT, p.TOP);
-            p.noStroke();
-
-            // P2 header
-            p.textSize(14);
-            p.fill(255);
-            p.text("P2", rightX, 10);
-
-            // PIECES header
-            p.textSize(10);
-            p.fill(p2Mode === "pieces" ? 255 : 80);
-            p.text("PIECES", rightX, 30);
-
-            // Piece preview or "?" for random
-            if (pieceMode === -1) {
-                p.textSize(20);
-                p.textAlign(p.CENTER, p.CENTER);
-                p.fill(p2Mode === "pieces" ? [100, 255, 100] : [50, 100, 50]);
-                p.text("?", rightX - 20, 65);
-            } else {
-                const pieceShape = getShape(pieceMode, 0);
-                const pieceColor = COLORS[pieceMode + 1];
-                const brightness = p2Mode === "pieces" ? 1.0 : 0.4;
-                const pieceStartX = rightX - 45;
-                const pieceStartY = 45;
-                for (let row = 0; row < pieceShape.length; row++) {
-                    for (let col = 0; col < pieceShape[row].length; col++) {
-                        if (pieceShape[row][col]) {
-                            p.fill(
-                                pieceColor[0] * brightness,
-                                pieceColor[1] * brightness,
-                                pieceColor[2] * brightness
-                            );
-                            p.rect(pieceStartX + col * 10, pieceStartY + row * 10, 9, 9);
-                        }
-                    }
-                }
-            }
-
-            // DRAW header
-            p.textSize(10);
-            p.textAlign(p.RIGHT, p.TOP);
-            p.fill(p2Mode === "draw" ? [255, 100, 100] : 80);
-            p.text("DRAW", rightX, 100);
-
-            // GARBAGE header
-            p.fill(p2Mode === "garbage" ? [255, 200, 50] : 80);
-            p.text("GARBAGE", rightX, 115);
-
-            // SPEED header and value
-            p.fill(p2Mode === "speed" ? [100, 200, 255] : 80);
-            p.text("SPEED", rightX, 130);
-            p.textSize(12);
-            p.text(speedMultiplier.toFixed(2) + "x", rightX, 145);
-        }
     }
 
     function drawUI(): void {
-        const uiX = BOARD_X + COLS * CELL_SIZE + 25;
+        const uiX = BOARD_X + cols * cellSize + 15;
 
         p.fill(255);
         p.noStroke();
@@ -351,7 +290,7 @@ const sketch = (p: p5) => {
                 if (shape[row][col]) {
                     const newX = piece.x + col + dx;
                     const newY = piece.y + row + dy;
-                    if (newX < 0 || newX >= COLS || newY >= ROWS) {
+                    if (newX < 0 || newX >= COLS_SINGLE || newY >= ROWS) {
                         return true;
                     }
                     if (newY >= 0 && demoBoard[newY][newX]) {
@@ -370,7 +309,7 @@ const sketch = (p: p5) => {
                 if (shape[row][col]) {
                     const boardY = piece.y + row;
                     const boardX = piece.x + col;
-                    if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS) {
+                    if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS_SINGLE) {
                         demoBoard[boardY][boardX] = piece.type + 1;
                     }
                 }
@@ -382,7 +321,7 @@ const sketch = (p: p5) => {
         for (let row = ROWS - 1; row >= 0; row--) {
             if (demoBoard[row].every((cell) => cell !== 0)) {
                 demoBoard.splice(row, 1);
-                demoBoard.unshift(Array(COLS).fill(0));
+                demoBoard.unshift(Array(COLS_SINGLE).fill(0));
                 row++;
             }
         }
@@ -395,13 +334,13 @@ const sketch = (p: p5) => {
         return {
             type,
             rotation: 0,
-            x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2),
+            x: Math.floor(COLS_SINGLE / 2) - Math.floor(shape[0].length / 2),
             y: 0,
         };
     }
 
     function resetDemo(): void {
-        demoBoard = createBoard();
+        demoBoard = createBoard(COLS_SINGLE);
         demoNextPiece = Math.floor(p.random(TETROMINOS.length));
         demoPiece = demoSpawnPiece();
         demoLastFall = p.millis();
@@ -423,7 +362,6 @@ const sketch = (p: p5) => {
                 demoClearLines();
                 demoPiece = demoSpawnPiece();
                 if (demoCollides(demoPiece, 0, 0)) {
-                    // Game over - reset demo
                     resetDemo();
                 }
             }
@@ -432,26 +370,23 @@ const sketch = (p: p5) => {
     }
 
     function drawDemoBoard(): void {
-        // Draw border
         p.stroke(80, 80, 120);
         p.strokeWeight(2);
         p.noFill();
-        p.rect(BOARD_X - 2, BOARD_Y - 2, COLS * CELL_SIZE + 3, ROWS * CELL_SIZE + 3);
+        p.rect(BOARD_X - 2, BOARD_Y - 2, COLS_SINGLE * CELL_SIZE_SINGLE + 3, ROWS * CELL_SIZE_SINGLE + 3);
 
-        // Draw cells (dimmed)
         for (let row = 0; row < ROWS; row++) {
-            for (let col = 0; col < COLS; col++) {
+            for (let col = 0; col < COLS_SINGLE; col++) {
                 const colorIndex = demoBoard[row][col];
                 const baseColor = COLORS[colorIndex];
-                const px = BOARD_X + col * CELL_SIZE;
-                const py = BOARD_Y + row * CELL_SIZE;
+                const px = BOARD_X + col * CELL_SIZE_SINGLE;
+                const py = BOARD_Y + row * CELL_SIZE_SINGLE;
                 p.fill(baseColor[0] * 0.5, baseColor[1] * 0.5, baseColor[2] * 0.5);
                 p.noStroke();
-                p.rect(px, py, CELL_SIZE - 1, CELL_SIZE - 1);
+                p.rect(px, py, CELL_SIZE_SINGLE - 1, CELL_SIZE_SINGLE - 1);
             }
         }
 
-        // Draw current piece (dimmed)
         if (demoPiece) {
             const shape = getShape(demoPiece.type, demoPiece.rotation);
             const pieceColor = COLORS[demoPiece.type + 1];
@@ -460,11 +395,11 @@ const sketch = (p: p5) => {
                     if (shape[row][col]) {
                         const y = demoPiece.y + row;
                         if (y >= 0) {
-                            const px = BOARD_X + (demoPiece.x + col) * CELL_SIZE;
-                            const py = BOARD_Y + y * CELL_SIZE;
+                            const px = BOARD_X + (demoPiece.x + col) * CELL_SIZE_SINGLE;
+                            const py = BOARD_Y + y * CELL_SIZE_SINGLE;
                             p.fill(pieceColor[0] * 0.6, pieceColor[1] * 0.6, pieceColor[2] * 0.6);
                             p.noStroke();
-                            p.rect(px, py, CELL_SIZE - 1, CELL_SIZE - 1);
+                            p.rect(px, py, CELL_SIZE_SINGLE - 1, CELL_SIZE_SINGLE - 1);
                         }
                     }
                 }
@@ -473,21 +408,18 @@ const sketch = (p: p5) => {
     }
 
     function drawStartScreen(): void {
-        // Update and draw demo game in background
         updateDemo();
         drawDemoBoard();
 
-        // Semi-transparent overlay
         p.fill(26, 26, 46, 180);
         p.noStroke();
-        p.rect(BOARD_X + COLS * CELL_SIZE + 10, 0, WIDTH - BOARD_X - COLS * CELL_SIZE - 10, HEIGHT);
+        p.rect(BOARD_X + COLS_SINGLE * CELL_SIZE_SINGLE + 10, 0, WIDTH - BOARD_X - COLS_SINGLE * CELL_SIZE_SINGLE - 10, HEIGHT);
 
         p.fill(255);
         p.textSize(24);
         p.textAlign(p.CENTER, p.CENTER);
         p.text("FRIENDTRIS", WIDTH / 2 + 60, 50);
 
-        // P1 Controls
         p.fill(255);
         p.textSize(10);
         const ctrlX = WIDTH / 2 + 60;
@@ -527,7 +459,6 @@ const sketch = (p: p5) => {
         p.textSize(10);
         p.text("Lines: " + lines + "  Level: " + level, WIDTH / 2, 110);
 
-        // P1 Controls (same as start screen)
         p.fill(255);
         p.textSize(10);
         const ctrlY = 150;
@@ -551,26 +482,24 @@ const sketch = (p: p5) => {
     }
 
     function resetGame(): void {
-        board = createBoard();
+        cols = isMultiplayer ? COLS_MULTI : COLS_SINGLE;
+        cellSize = isMultiplayer ? CELL_SIZE_MULTI : CELL_SIZE_SINGLE;
+        board = createBoard(cols);
         score = 0;
-        lines = 0;
+        lines = LINES_PER_LEVEL;
         level = 1;
         gameOver = false;
-        pieceMode = -1;
-        p2Mode = "pieces";
-        p2CursorX = Math.floor(COLS / 2);
-        p2CursorY = Math.floor(ROWS / 2);
-        spinnerAccumulator = 0;
-        speedMultiplier = 1.0;
-        nextPiece = getNextPieceType();
-        currentPiece = spawnPiece();
+        nextPiece = getRandomPieceType();
+        currentPiece = spawnPieceP1();
+        currentPiece2 = isMultiplayer ? spawnPieceP2() : null;
         lastFall = p.millis();
+        lastFall2 = p.millis();
     }
 
     p.setup = () => {
         p.createCanvas(WIDTH, HEIGHT);
-        board = createBoard();
-        nextPiece = getNextPieceType();
+        board = createBoard(COLS_SINGLE);
+        nextPiece = getRandomPieceType();
     };
 
     p.draw = () => {
@@ -608,7 +537,7 @@ const sketch = (p: p5) => {
             return;
         }
 
-        // Handle input
+        // ============ PLAYER 1 INPUT ============
         if (currentPiece) {
             // Horizontal movement (with repeat)
             if (PLAYER_1.DPAD.left && now - lastMove > moveDelay) {
@@ -660,7 +589,7 @@ const sketch = (p: p5) => {
                 if (cleared > 0) {
                     updateScore(cleared);
                 }
-                currentPiece = spawnPiece();
+                currentPiece = spawnPieceP1();
                 if (collides(currentPiece, 0, 0)) {
                     gameOver = true;
                 }
@@ -677,7 +606,7 @@ const sketch = (p: p5) => {
                     if (cleared > 0) {
                         updateScore(cleared);
                     }
-                    currentPiece = spawnPiece();
+                    currentPiece = spawnPieceP1();
                     if (collides(currentPiece, 0, 0)) {
                         gameOver = true;
                     }
@@ -686,73 +615,81 @@ const sketch = (p: p5) => {
             }
         }
 
-        // Player 2 sabotage (multiplayer only)
-        if (isMultiplayer) {
-            // Spinner switches P2 mode (with accumulation for smoother control)
-            const spinnerDelta = PLAYER_2_SPINNER.SPINNER.step_delta;
-            spinnerAccumulator += spinnerDelta;
-
-            if (Math.abs(spinnerAccumulator) >= SPINNER_THRESHOLD) {
-                const modes: Array<"pieces" | "draw" | "garbage" | "speed"> = ["pieces", "draw", "garbage", "speed"];
-                const currentIndex = modes.indexOf(p2Mode);
-                const direction = spinnerAccumulator > 0 ? 1 : -1;
-                p2Mode = modes[(currentIndex + direction + modes.length) % modes.length];
-                spinnerAccumulator = 0; // Reset after mode change
+        // ============ PLAYER 2 INPUT (multiplayer only) ============
+        if (isMultiplayer && currentPiece2) {
+            // Horizontal movement (with repeat)
+            if (PLAYER_2.DPAD.left && now - lastMove2 > moveDelay) {
+                if (!collides(currentPiece2, -1, 0)) {
+                    currentPiece2.x--;
+                    lastMove2 = now;
+                }
+            }
+            if (PLAYER_2.DPAD.right && now - lastMove2 > moveDelay) {
+                if (!collides(currentPiece2, 1, 0)) {
+                    currentPiece2.x++;
+                    lastMove2 = now;
+                }
             }
 
-            if (p2Mode === "pieces") {
-                // Up/down to change piece type
-                if (PLAYER_2.DPAD.up && !prevP2Up) {
-                    pieceMode++;
-                    if (pieceMode > 6) pieceMode = -1;
-                    nextPiece = getNextPieceType();
+            // Soft drop (hold down)
+            if (PLAYER_2.DPAD.down && now - lastFall2 > 50) {
+                if (!collides(currentPiece2, 0, 1)) {
+                    currentPiece2.y++;
+                    lastFall2 = now;
+                    score += 1;
                 }
-                if (PLAYER_2.DPAD.down && !prevP2Down) {
-                    pieceMode--;
-                    if (pieceMode < -1) pieceMode = 6;
-                    nextPiece = getNextPieceType();
+            }
+
+            // Rotation with SRS wall kicks (A = CCW, B = CW)
+            if (PLAYER_2.A && !prevP2A && now - lastRotate2 > rotateDelay) {
+                const rotated = tryRotate(board, currentPiece2, -1);
+                if (rotated) {
+                    currentPiece2 = rotated;
+                    lastRotate2 = now;
                 }
-            } else if (p2Mode === "draw") {
-                // Draw mode: D-pad moves cursor, A/B toggles cell
-                if (PLAYER_2.DPAD.up && !prevP2Up) {
-                    p2CursorY = Math.max(0, p2CursorY - 1);
+            }
+            if (PLAYER_2.B && !prevP2B && now - lastRotate2 > rotateDelay) {
+                const rotated = tryRotate(board, currentPiece2, 1);
+                if (rotated) {
+                    currentPiece2 = rotated;
+                    lastRotate2 = now;
                 }
-                if (PLAYER_2.DPAD.down && !prevP2Down) {
-                    p2CursorY = Math.min(ROWS - 1, p2CursorY + 1);
+            }
+
+            // Hard drop (UP - edge triggered)
+            if (PLAYER_2.DPAD.up && !prevP2Up) {
+                while (!collides(currentPiece2, 0, 1)) {
+                    currentPiece2.y++;
+                    score += 2;
                 }
-                if (PLAYER_2.DPAD.left && !prevP2Left) {
-                    p2CursorX = Math.max(0, p2CursorX - 1);
+                lockPiece(currentPiece2);
+                const cleared = clearLines();
+                if (cleared > 0) {
+                    updateScore(cleared);
                 }
-                if (PLAYER_2.DPAD.right && !prevP2Right) {
-                    p2CursorX = Math.min(COLS - 1, p2CursorX + 1);
+                currentPiece2 = spawnPieceP2();
+                if (collides(currentPiece2, 0, 0)) {
+                    gameOver = true;
                 }
-                if ((PLAYER_2.A && !prevP2A) || (PLAYER_2.B && !prevP2B)) {
-                    // Toggle cell (use color 8 for P2-placed blocks)
-                    board[p2CursorY][p2CursorX] = board[p2CursorY][p2CursorX] ? 0 : 8;
-                    // Check if this completed a line
+                lastFall2 = now;
+            }
+
+            // Natural falling
+            if (now - lastFall2 > getFallSpeed()) {
+                if (!collides(currentPiece2, 0, 1)) {
+                    currentPiece2.y++;
+                } else {
+                    lockPiece(currentPiece2);
                     const cleared = clearLines();
                     if (cleared > 0) {
                         updateScore(cleared);
                     }
+                    currentPiece2 = spawnPieceP2();
+                    if (collides(currentPiece2, 0, 0)) {
+                        gameOver = true;
+                    }
                 }
-            } else if (p2Mode === "garbage") {
-                // Garbage mode: A/B adds a garbage row
-                if ((PLAYER_2.A && !prevP2A) || (PLAYER_2.B && !prevP2B)) {
-                    // Remove top row, add garbage row at bottom
-                    board.shift();
-                    const holePosition = Math.floor(p.random(COLS));
-                    const garbageRow = Array(COLS).fill(8);
-                    garbageRow[holePosition] = 0;
-                    board.push(garbageRow);
-                }
-            } else if (p2Mode === "speed") {
-                // Speed mode: Up/down to adjust speed multiplier
-                if (PLAYER_2.DPAD.up && !prevP2Up) {
-                    speedMultiplier = Math.min(SPEED_MAX, speedMultiplier + SPEED_STEP);
-                }
-                if (PLAYER_2.DPAD.down && !prevP2Down) {
-                    speedMultiplier = Math.max(SPEED_MIN, speedMultiplier - SPEED_STEP);
-                }
+                lastFall2 = now;
             }
         }
 
@@ -761,18 +698,18 @@ const sketch = (p: p5) => {
         prevA = PLAYER_1.A;
         prevB = PLAYER_1.B;
         prevP2Up = PLAYER_2.DPAD.up;
-        prevP2Down = PLAYER_2.DPAD.down;
-        prevP2Left = PLAYER_2.DPAD.left;
-        prevP2Right = PLAYER_2.DPAD.right;
         prevP2A = PLAYER_2.A;
         prevP2B = PLAYER_2.B;
 
         // Draw everything
         drawBoard();
-        drawP2Cursor();
         if (currentPiece && !gameOver) {
             drawGhost(currentPiece);
             drawPiece(currentPiece);
+        }
+        if (isMultiplayer && currentPiece2 && !gameOver) {
+            drawGhost(currentPiece2);
+            drawPiece(currentPiece2);
         }
         drawNextPiece();
         drawUI();
