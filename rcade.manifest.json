@@ -1,0 +1,16 @@
+{
+  "$schema": "https://rcade.dev/manifest.schema.json",
+  "name": "friendtris",
+  "display_name": "friendtris",
+  "description": "friendtris",
+  "visibility": "internal",
+  "authors": {
+    "display_name": "Jelle"
+  },
+  "dependencies": [
+    {
+      "name": "@rcade/input-classic",
+      "version": "1.0.0"
+    }
+  ]
+}
