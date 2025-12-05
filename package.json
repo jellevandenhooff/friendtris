@@ -1,6 +1,6 @@
 {
     "name": "friendtris",
-    "private": false,
+    "private": true,
     "version": "1.0.0",
     "description": "friendtris",
     "type": "module",

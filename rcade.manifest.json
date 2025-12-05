@@ -3,7 +3,7 @@
   "name": "friendtris",
   "display_name": "friendtris",
   "description": "friendtris",
-  "visibility": "internal",
+  "visibility": "public",
   "authors": {
     "display_name": "Jelle"
   },
