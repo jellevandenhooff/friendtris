@@ -60,11 +60,18 @@ const sketch = (p: p5) => {
     let spinnerAccumulator = 0;
     const SPINNER_THRESHOLD = 16; // Steps needed to trigger mode change
 
-    // P2 speed control (0.5x to 3x, default 1x)
+    // P2 speed control (0.5x to 10x, default 1x)
     let speedMultiplier = 1.0;
     const SPEED_MIN = 0.5;
-    const SPEED_MAX = 3.0;
-    const SPEED_STEP = 0.25;
+    const SPEED_MAX = 10.0;
+    const SPEED_STEP = 0.5;
+
+    // Demo mode state (for attract screen)
+    let demoBoard: number[][] = [];
+    let demoPiece: Piece | null = null;
+    let demoNextPiece = 0;
+    let demoLastFall = 0;
+    const DEMO_FALL_SPEED = 150;
 
     function getFallSpeed(): number {
         const baseSpeed = Math.max(100, 800 - (level - 1) * 70);
@@ -336,33 +343,172 @@ const sketch = (p: p5) => {
         p.text(level.toString(), uiX, 182);
     }
 
+    // Demo mode functions for attract screen
+    function demoCollides(piece: Piece, dx: number, dy: number): boolean {
+        const shape = getShape(piece.type, piece.rotation);
+        for (let row = 0; row < shape.length; row++) {
+            for (let col = 0; col < shape[row].length; col++) {
+                if (shape[row][col]) {
+                    const newX = piece.x + col + dx;
+                    const newY = piece.y + row + dy;
+                    if (newX < 0 || newX >= COLS || newY >= ROWS) {
+                        return true;
+                    }
+                    if (newY >= 0 && demoBoard[newY][newX]) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    function demoLockPiece(piece: Piece): void {
+        const shape = getShape(piece.type, piece.rotation);
+        for (let row = 0; row < shape.length; row++) {
+            for (let col = 0; col < shape[row].length; col++) {
+                if (shape[row][col]) {
+                    const boardY = piece.y + row;
+                    const boardX = piece.x + col;
+                    if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS) {
+                        demoBoard[boardY][boardX] = piece.type + 1;
+                    }
+                }
+            }
+        }
+    }
+
+    function demoClearLines(): void {
+        for (let row = ROWS - 1; row >= 0; row--) {
+            if (demoBoard[row].every((cell) => cell !== 0)) {
+                demoBoard.splice(row, 1);
+                demoBoard.unshift(Array(COLS).fill(0));
+                row++;
+            }
+        }
+    }
+
+    function demoSpawnPiece(): Piece {
+        const type = demoNextPiece;
+        demoNextPiece = Math.floor(p.random(TETROMINOS.length));
+        const shape = getShape(type, 0);
+        return {
+            type,
+            rotation: 0,
+            x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2),
+            y: 0,
+        };
+    }
+
+    function resetDemo(): void {
+        demoBoard = createBoard();
+        demoNextPiece = Math.floor(p.random(TETROMINOS.length));
+        demoPiece = demoSpawnPiece();
+        demoLastFall = p.millis();
+    }
+
+    function updateDemo(): void {
+        const now = p.millis();
+
+        if (!demoPiece) {
+            resetDemo();
+            return;
+        }
+
+        if (now - demoLastFall > DEMO_FALL_SPEED) {
+            if (!demoCollides(demoPiece, 0, 1)) {
+                demoPiece.y++;
+            } else {
+                demoLockPiece(demoPiece);
+                demoClearLines();
+                demoPiece = demoSpawnPiece();
+                if (demoCollides(demoPiece, 0, 0)) {
+                    // Game over - reset demo
+                    resetDemo();
+                }
+            }
+            demoLastFall = now;
+        }
+    }
+
+    function drawDemoBoard(): void {
+        // Draw border
+        p.stroke(80, 80, 120);
+        p.strokeWeight(2);
+        p.noFill();
+        p.rect(BOARD_X - 2, BOARD_Y - 2, COLS * CELL_SIZE + 3, ROWS * CELL_SIZE + 3);
+
+        // Draw cells (dimmed)
+        for (let row = 0; row < ROWS; row++) {
+            for (let col = 0; col < COLS; col++) {
+                const colorIndex = demoBoard[row][col];
+                const baseColor = COLORS[colorIndex];
+                const px = BOARD_X + col * CELL_SIZE;
+                const py = BOARD_Y + row * CELL_SIZE;
+                p.fill(baseColor[0] * 0.5, baseColor[1] * 0.5, baseColor[2] * 0.5);
+                p.noStroke();
+                p.rect(px, py, CELL_SIZE - 1, CELL_SIZE - 1);
+            }
+        }
+
+        // Draw current piece (dimmed)
+        if (demoPiece) {
+            const shape = getShape(demoPiece.type, demoPiece.rotation);
+            const pieceColor = COLORS[demoPiece.type + 1];
+            for (let row = 0; row < shape.length; row++) {
+                for (let col = 0; col < shape[row].length; col++) {
+                    if (shape[row][col]) {
+                        const y = demoPiece.y + row;
+                        if (y >= 0) {
+                            const px = BOARD_X + (demoPiece.x + col) * CELL_SIZE;
+                            const py = BOARD_Y + y * CELL_SIZE;
+                            p.fill(pieceColor[0] * 0.6, pieceColor[1] * 0.6, pieceColor[2] * 0.6);
+                            p.noStroke();
+                            p.rect(px, py, CELL_SIZE - 1, CELL_SIZE - 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     function drawStartScreen(): void {
+        // Update and draw demo game in background
+        updateDemo();
+        drawDemoBoard();
+
+        // Semi-transparent overlay
+        p.fill(26, 26, 46, 180);
+        p.noStroke();
+        p.rect(BOARD_X + COLS * CELL_SIZE + 10, 0, WIDTH - BOARD_X - COLS * CELL_SIZE - 10, HEIGHT);
+
         p.fill(255);
         p.textSize(24);
         p.textAlign(p.CENTER, p.CENTER);
-        p.text("FRIENDTRIS", WIDTH / 2, 50);
+        p.text("FRIENDTRIS", WIDTH / 2 + 60, 50);
 
         // P1 Controls
         p.fill(255);
         p.textSize(10);
+        const ctrlX = WIDTH / 2 + 60;
         const ctrlY = 100;
         p.textAlign(p.RIGHT, p.CENTER);
-        p.text("MOVE", WIDTH / 2 - 10, ctrlY);
-        p.text("SOFT DROP", WIDTH / 2 - 10, ctrlY + 18);
-        p.text("HARD DROP", WIDTH / 2 - 10, ctrlY + 36);
-        p.text("ROTATE", WIDTH / 2 - 10, ctrlY + 54);
+        p.text("MOVE", ctrlX - 10, ctrlY);
+        p.text("SOFT DROP", ctrlX - 10, ctrlY + 18);
+        p.text("HARD DROP", ctrlX - 10, ctrlY + 36);
+        p.text("ROTATE", ctrlX - 10, ctrlY + 54);
 
         p.fill(150);
         p.textAlign(p.LEFT, p.CENTER);
-        p.text("LEFT / RIGHT", WIDTH / 2 + 10, ctrlY);
-        p.text("DOWN", WIDTH / 2 + 10, ctrlY + 18);
-        p.text("UP", WIDTH / 2 + 10, ctrlY + 36);
-        p.text("A / B", WIDTH / 2 + 10, ctrlY + 54);
+        p.text("LEFT / RIGHT", ctrlX + 10, ctrlY);
+        p.text("DOWN", ctrlX + 10, ctrlY + 18);
+        p.text("UP", ctrlX + 10, ctrlY + 36);
+        p.text("A / B", ctrlX + 10, ctrlY + 54);
 
         p.fill(255);
         p.textAlign(p.CENTER, p.CENTER);
         p.textSize(12);
-        p.text("P1 / P2 to start", WIDTH / 2, 200);
+        p.text("P1 / P2 to start", ctrlX, 200);
     }
 
     function drawGameOver(): void {
@@ -583,6 +729,11 @@ const sketch = (p: p5) => {
                 if ((PLAYER_2.A && !prevP2A) || (PLAYER_2.B && !prevP2B)) {
                     // Toggle cell (use color 8 for P2-placed blocks)
                     board[p2CursorY][p2CursorX] = board[p2CursorY][p2CursorX] ? 0 : 8;
+                    // Check if this completed a line
+                    const cleared = clearLines();
+                    if (cleared > 0) {
+                        updateScore(cleared);
+                    }
                 }
             } else if (p2Mode === "garbage") {
                 // Garbage mode: A/B adds a garbage row
