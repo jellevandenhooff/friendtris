@@ -53,15 +53,22 @@ const sketch = (p: p5) => {
     let prevP2B = false;
     let isMultiplayer = false;
 
-    // P2 mode: "pieces" = change next piece, "draw" = toggle cells, "garbage" = add garbage rows
-    let p2Mode: "pieces" | "draw" | "garbage" = "pieces";
+    // P2 mode: "pieces" = change next piece, "draw" = toggle cells, "garbage" = add garbage rows, "speed" = control fall speed
+    let p2Mode: "pieces" | "draw" | "garbage" | "speed" = "pieces";
     let p2CursorX = Math.floor(COLS / 2);
     let p2CursorY = Math.floor(ROWS / 2);
     let spinnerAccumulator = 0;
     const SPINNER_THRESHOLD = 16; // Steps needed to trigger mode change
 
+    // P2 speed control (0.5x to 3x, default 1x)
+    let speedMultiplier = 1.0;
+    const SPEED_MIN = 0.5;
+    const SPEED_MAX = 3.0;
+    const SPEED_STEP = 0.25;
+
     function getFallSpeed(): number {
-        return Math.max(100, 800 - (level - 1) * 70);
+        const baseSpeed = Math.max(100, 800 - (level - 1) * 70);
+        return baseSpeed / speedMultiplier;
     }
 
     function createBoard(): number[][] {
@@ -297,6 +304,12 @@ const sketch = (p: p5) => {
             // GARBAGE header
             p.fill(p2Mode === "garbage" ? [255, 200, 50] : 80);
             p.text("GARBAGE", rightX, 115);
+
+            // SPEED header and value
+            p.fill(p2Mode === "speed" ? [100, 200, 255] : 80);
+            p.text("SPEED", rightX, 130);
+            p.textSize(12);
+            p.text(speedMultiplier.toFixed(2) + "x", rightX, 145);
         }
     }
 
@@ -402,6 +415,7 @@ const sketch = (p: p5) => {
         p2CursorX = Math.floor(COLS / 2);
         p2CursorY = Math.floor(ROWS / 2);
         spinnerAccumulator = 0;
+        speedMultiplier = 1.0;
         nextPiece = getNextPieceType();
         currentPiece = spawnPiece();
         lastFall = p.millis();
@@ -533,7 +547,7 @@ const sketch = (p: p5) => {
             spinnerAccumulator += spinnerDelta;
 
             if (Math.abs(spinnerAccumulator) >= SPINNER_THRESHOLD) {
-                const modes: Array<"pieces" | "draw" | "garbage"> = ["pieces", "draw", "garbage"];
+                const modes: Array<"pieces" | "draw" | "garbage" | "speed"> = ["pieces", "draw", "garbage", "speed"];
                 const currentIndex = modes.indexOf(p2Mode);
                 const direction = spinnerAccumulator > 0 ? 1 : -1;
                 p2Mode = modes[(currentIndex + direction + modes.length) % modes.length];
@@ -579,6 +593,14 @@ const sketch = (p: p5) => {
                     const garbageRow = Array(COLS).fill(8);
                     garbageRow[holePosition] = 0;
                     board.push(garbageRow);
+                }
+            } else if (p2Mode === "speed") {
+                // Speed mode: Up/down to adjust speed multiplier
+                if (PLAYER_2.DPAD.up && !prevP2Up) {
+                    speedMultiplier = Math.min(SPEED_MAX, speedMultiplier + SPEED_STEP);
+                }
+                if (PLAYER_2.DPAD.down && !prevP2Down) {
+                    speedMultiplier = Math.max(SPEED_MIN, speedMultiplier - SPEED_STEP);
                 }
             }
         }
