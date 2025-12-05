@@ -57,6 +57,8 @@ const sketch = (p: p5) => {
     let p2Mode: "pieces" | "draw" | "garbage" = "pieces";
     let p2CursorX = Math.floor(COLS / 2);
     let p2CursorY = Math.floor(ROWS / 2);
+    let spinnerAccumulator = 0;
+    const SPINNER_THRESHOLD = 16; // Steps needed to trigger mode change
 
     function getFallSpeed(): number {
         return Math.max(100, 800 - (level - 1) * 70);
@@ -399,6 +401,7 @@ const sketch = (p: p5) => {
         p2Mode = "pieces";
         p2CursorX = Math.floor(COLS / 2);
         p2CursorY = Math.floor(ROWS / 2);
+        spinnerAccumulator = 0;
         nextPiece = getNextPieceType();
         currentPiece = spawnPiece();
         lastFall = p.millis();
@@ -525,13 +528,16 @@ const sketch = (p: p5) => {
 
         // Player 2 sabotage (multiplayer only)
         if (isMultiplayer) {
-            // Spinner switches P2 mode
+            // Spinner switches P2 mode (with accumulation for smoother control)
             const spinnerDelta = PLAYER_2_SPINNER.SPINNER.step_delta;
-            if (spinnerDelta !== 0) {
+            spinnerAccumulator += spinnerDelta;
+
+            if (Math.abs(spinnerAccumulator) >= SPINNER_THRESHOLD) {
                 const modes: Array<"pieces" | "draw" | "garbage"> = ["pieces", "draw", "garbage"];
                 const currentIndex = modes.indexOf(p2Mode);
-                const direction = spinnerDelta > 0 ? 1 : -1;
+                const direction = spinnerAccumulator > 0 ? 1 : -1;
                 p2Mode = modes[(currentIndex + direction + modes.length) % modes.length];
+                spinnerAccumulator = 0; // Reset after mode change
             }
 
             if (p2Mode === "pieces") {
