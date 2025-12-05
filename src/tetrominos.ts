@@ -291,10 +291,11 @@ export function getShape(
     return parseShape(TETROMINOS[tetrominoIndex].shapes[rotation]);
 }
 
-// Colors including empty cell (index 0)
+// Colors including empty cell (index 0) and P2 blocks (index 8)
 export const COLORS: [number, number, number][] = [
     [40, 40, 60], // Empty/background
     ...TETROMINOS.map((t) => t.color),
+    [180, 80, 80], // P2-placed blocks (index 8)
 ];
 
 // Piece state for rotation

@@ -46,7 +46,16 @@ const sketch = (p: p5) => {
     let pieceMode = -1;
     let prevP2Up = false;
     let prevP2Down = false;
+    let prevP2Left = false;
+    let prevP2Right = false;
+    let prevP2A = false;
+    let prevP2B = false;
     let isMultiplayer = false;
+
+    // P2 mode: "pieces" = change next piece, "draw" = toggle cells
+    let p2Mode: "pieces" | "draw" = "pieces";
+    let p2CursorX = Math.floor(COLS / 2);
+    let p2CursorY = Math.floor(ROWS / 2);
 
     function getFallSpeed(): number {
         return Math.max(100, 800 - (level - 1) * 70);
@@ -129,22 +138,29 @@ const sketch = (p: p5) => {
         level = Math.floor(lines / 10) + 1;
     }
 
-    function drawCell(x: number, y: number, colorIndex: number, ghost: boolean = false): void {
-        const color = COLORS[colorIndex];
+    function drawCell(x: number, y: number, colorIndex: number, mode: "normal" | "active" | "ghost" = "normal"): void {
+        const baseColor = COLORS[colorIndex];
         const px = BOARD_X + x * CELL_SIZE;
         const py = BOARD_Y + y * CELL_SIZE;
 
-        if (ghost) {
+        if (mode === "ghost") {
             p.noFill();
-            p.stroke(color[0], color[1], color[2], 100);
+            p.stroke(baseColor[0], baseColor[1], baseColor[2], 100);
             p.strokeWeight(1);
             p.rect(px + 1, py + 1, CELL_SIZE - 2, CELL_SIZE - 2);
         } else {
+            // Active pieces are brighter
+            const brightness = mode === "active" ? 1.3 : 1.0;
+            const color = [
+                Math.min(255, baseColor[0] * brightness),
+                Math.min(255, baseColor[1] * brightness),
+                Math.min(255, baseColor[2] * brightness),
+            ];
             p.fill(color[0], color[1], color[2]);
             p.noStroke();
             p.rect(px, py, CELL_SIZE - 1, CELL_SIZE - 1);
             // Highlight
-            p.fill(255, 255, 255, 50);
+            p.fill(255, 255, 255, mode === "active" ? 80 : 50);
             p.rect(px, py, CELL_SIZE - 1, 2);
             p.rect(px, py, 2, CELL_SIZE - 1);
         }
@@ -165,14 +181,14 @@ const sketch = (p: p5) => {
         }
     }
 
-    function drawPiece(piece: Piece, ghost: boolean = false): void {
+    function drawPiece(piece: Piece, mode: "normal" | "active" | "ghost" = "active"): void {
         const shape = getShape(piece.type, piece.rotation);
         for (let row = 0; row < shape.length; row++) {
             for (let col = 0; col < shape[row].length; col++) {
                 if (shape[row][col]) {
                     const y = piece.y + row;
                     if (y >= 0) {
-                        drawCell(piece.x + col, y, piece.type + 1, ghost);
+                        drawCell(piece.x + col, y, piece.type + 1, mode);
                     }
                 }
             }
@@ -185,7 +201,23 @@ const sketch = (p: p5) => {
             ghostY++;
         }
         if (ghostY !== piece.y) {
-            drawPiece({ ...piece, y: ghostY }, true);
+            drawPiece({ ...piece, y: ghostY }, "ghost");
+        }
+    }
+
+    function drawP2Cursor(): void {
+        if (!isMultiplayer || p2Mode !== "draw") return;
+
+        const px = BOARD_X + p2CursorX * CELL_SIZE;
+        const py = BOARD_Y + p2CursorY * CELL_SIZE;
+
+        // Blinking cursor
+        const blink = Math.floor(p.millis() / 200) % 2 === 0;
+        if (blink) {
+            p.noFill();
+            p.stroke(255, 100, 100);
+            p.strokeWeight(2);
+            p.rect(px - 1, py - 1, CELL_SIZE + 1, CELL_SIZE + 1);
         }
     }
 
@@ -211,14 +243,29 @@ const sketch = (p: p5) => {
             }
         }
 
-        // Mode indicator next to shape (multiplayer only)
+        // Mode indicators on the right (multiplayer only)
         if (isMultiplayer) {
-            p.fill(150);
-            p.textSize(8);
-            p.textAlign(p.LEFT, p.CENTER);
-            const indicatorX = previewX + 45;
-            const indicatorY = previewY + 15;
-            p.text(pieceMode === -1 ? "(random)" : "(fixed)", indicatorX, indicatorY);
+            p.textSize(10);
+            p.textAlign(p.RIGHT, p.TOP);
+            const rightX = WIDTH - 10;
+
+            // P2 mode indicator
+            if (p2Mode === "draw") {
+                p.fill(255, 100, 100);
+                p.text("DRAW", rightX, previewY - 15);
+            } else {
+                p.fill(100, 100, 100);
+                p.text("PIECES", rightX, previewY - 15);
+            }
+
+            // Piece selection indicator
+            if (pieceMode === -1) {
+                p.fill(100, 255, 100);
+                p.text("RANDOM", rightX, previewY);
+            } else {
+                p.fill(255, 200, 100);
+                p.text("FIXED", rightX, previewY);
+            }
         }
     }
 
@@ -320,6 +367,9 @@ const sketch = (p: p5) => {
         level = 1;
         gameOver = false;
         pieceMode = -1;
+        p2Mode = "pieces";
+        p2CursorX = Math.floor(COLS / 2);
+        p2CursorY = Math.floor(ROWS / 2);
         nextPiece = getNextPieceType();
         currentPiece = spawnPiece();
         lastFall = p.millis();
@@ -444,19 +494,43 @@ const sketch = (p: p5) => {
             }
         }
 
-        // Player 2 sabotage: up/down to change piece mode (multiplayer only)
+        // Player 2 sabotage (multiplayer only)
         if (isMultiplayer) {
-            if (PLAYER_2.DPAD.up && !prevP2Up) {
-                pieceMode++;
-                if (pieceMode > 6) pieceMode = -1;
-                // Immediately affect the next piece
-                nextPiece = getNextPieceType();
+            // A button toggles P2 mode
+            if (PLAYER_2.A && !prevP2A) {
+                p2Mode = p2Mode === "pieces" ? "draw" : "pieces";
             }
-            if (PLAYER_2.DPAD.down && !prevP2Down) {
-                pieceMode--;
-                if (pieceMode < -1) pieceMode = 6;
-                // Immediately affect the next piece
-                nextPiece = getNextPieceType();
+
+            if (p2Mode === "pieces") {
+                // Up/down to change piece type
+                if (PLAYER_2.DPAD.up && !prevP2Up) {
+                    pieceMode++;
+                    if (pieceMode > 6) pieceMode = -1;
+                    nextPiece = getNextPieceType();
+                }
+                if (PLAYER_2.DPAD.down && !prevP2Down) {
+                    pieceMode--;
+                    if (pieceMode < -1) pieceMode = 6;
+                    nextPiece = getNextPieceType();
+                }
+            } else {
+                // Draw mode: D-pad moves cursor, B toggles cell
+                if (PLAYER_2.DPAD.up && !prevP2Up) {
+                    p2CursorY = Math.max(0, p2CursorY - 1);
+                }
+                if (PLAYER_2.DPAD.down && !prevP2Down) {
+                    p2CursorY = Math.min(ROWS - 1, p2CursorY + 1);
+                }
+                if (PLAYER_2.DPAD.left && !prevP2Left) {
+                    p2CursorX = Math.max(0, p2CursorX - 1);
+                }
+                if (PLAYER_2.DPAD.right && !prevP2Right) {
+                    p2CursorX = Math.min(COLS - 1, p2CursorX + 1);
+                }
+                if (PLAYER_2.B && !prevP2B) {
+                    // Toggle cell (use color 8 for P2-placed blocks)
+                    board[p2CursorY][p2CursorX] = board[p2CursorY][p2CursorX] ? 0 : 8;
+                }
             }
         }
 
@@ -466,9 +540,14 @@ const sketch = (p: p5) => {
         prevB = PLAYER_1.B;
         prevP2Up = PLAYER_2.DPAD.up;
         prevP2Down = PLAYER_2.DPAD.down;
+        prevP2Left = PLAYER_2.DPAD.left;
+        prevP2Right = PLAYER_2.DPAD.right;
+        prevP2A = PLAYER_2.A;
+        prevP2B = PLAYER_2.B;
 
         // Draw everything
         drawBoard();
+        drawP2Cursor();
         if (currentPiece && !gameOver) {
             drawGhost(currentPiece);
             drawPiece(currentPiece);
