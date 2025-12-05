@@ -1,5 +1,12 @@
 import p5 from "p5";
 import { PLAYER_1, SYSTEM } from "@rcade/plugin-input-classic";
+import {
+    TETROMINOS,
+    COLORS,
+    getShape,
+    tryRotate,
+    Piece,
+} from "./tetrominos";
 
 // Rcade game dimensions
 const WIDTH = 336;
@@ -11,78 +18,6 @@ const ROWS = 20;
 const CELL_SIZE = 12;
 const BOARD_X = 20;
 const BOARD_Y = 10;
-
-// Tetromino shapes (each rotation state)
-const SHAPES: number[][][][] = [
-    // I
-    [
-        [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]],
-        [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0]],
-        [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0]],
-        [[0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0]],
-    ],
-    // O
-    [
-        [[1, 1], [1, 1]],
-        [[1, 1], [1, 1]],
-        [[1, 1], [1, 1]],
-        [[1, 1], [1, 1]],
-    ],
-    // T
-    [
-        [[0, 1, 0], [1, 1, 1], [0, 0, 0]],
-        [[0, 1, 0], [0, 1, 1], [0, 1, 0]],
-        [[0, 0, 0], [1, 1, 1], [0, 1, 0]],
-        [[0, 1, 0], [1, 1, 0], [0, 1, 0]],
-    ],
-    // S
-    [
-        [[0, 1, 1], [1, 1, 0], [0, 0, 0]],
-        [[0, 1, 0], [0, 1, 1], [0, 0, 1]],
-        [[0, 0, 0], [0, 1, 1], [1, 1, 0]],
-        [[1, 0, 0], [1, 1, 0], [0, 1, 0]],
-    ],
-    // Z
-    [
-        [[1, 1, 0], [0, 1, 1], [0, 0, 0]],
-        [[0, 0, 1], [0, 1, 1], [0, 1, 0]],
-        [[0, 0, 0], [1, 1, 0], [0, 1, 1]],
-        [[0, 1, 0], [1, 1, 0], [1, 0, 0]],
-    ],
-    // J
-    [
-        [[1, 0, 0], [1, 1, 1], [0, 0, 0]],
-        [[0, 1, 1], [0, 1, 0], [0, 1, 0]],
-        [[0, 0, 0], [1, 1, 1], [0, 0, 1]],
-        [[0, 1, 0], [0, 1, 0], [1, 1, 0]],
-    ],
-    // L
-    [
-        [[0, 0, 1], [1, 1, 1], [0, 0, 0]],
-        [[0, 1, 0], [0, 1, 0], [0, 1, 1]],
-        [[0, 0, 0], [1, 1, 1], [1, 0, 0]],
-        [[1, 1, 0], [0, 1, 0], [0, 1, 0]],
-    ],
-];
-
-// Colors for each piece type (index 0 = empty)
-const COLORS: [number, number, number][] = [
-    [40, 40, 60],    // Empty/background
-    [0, 240, 240],   // I - Cyan
-    [240, 240, 0],   // O - Yellow
-    [160, 0, 240],   // T - Purple
-    [0, 240, 0],     // S - Green
-    [240, 0, 0],     // Z - Red
-    [0, 0, 240],     // J - Blue
-    [240, 160, 0],   // L - Orange
-];
-
-interface Piece {
-    shape: number;
-    rotation: number;
-    x: number;
-    y: number;
-}
 
 const sketch = (p: p5) => {
     let board: number[][] = [];
@@ -115,23 +50,19 @@ const sketch = (p: p5) => {
     }
 
     function spawnPiece(): Piece {
-        const shape = nextPiece;
-        nextPiece = Math.floor(p.random(SHAPES.length));
+        const type = nextPiece;
+        nextPiece = Math.floor(p.random(TETROMINOS.length));
+        const shape = getShape(type, 0);
         return {
-            shape,
+            type,
             rotation: 0,
-            x: Math.floor(COLS / 2) - Math.floor(SHAPES[shape][0][0].length / 2),
+            x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2),
             y: 0,
         };
     }
 
-    function getShape(piece: Piece): number[][] {
-        return SHAPES[piece.shape][piece.rotation];
-    }
-
-    function collides(piece: Piece, dx: number, dy: number, dr: number): boolean {
-        const newRotation = (piece.rotation + dr + 4) % 4;
-        const shape = SHAPES[piece.shape][newRotation];
+    function collides(piece: Piece, dx: number, dy: number): boolean {
+        const shape = getShape(piece.type, piece.rotation);
         for (let row = 0; row < shape.length; row++) {
             for (let col = 0; col < shape[row].length; col++) {
                 if (shape[row][col]) {
@@ -150,14 +81,14 @@ const sketch = (p: p5) => {
     }
 
     function lockPiece(piece: Piece): void {
-        const shape = getShape(piece);
+        const shape = getShape(piece.type, piece.rotation);
         for (let row = 0; row < shape.length; row++) {
             for (let col = 0; col < shape[row].length; col++) {
                 if (shape[row][col]) {
                     const boardY = piece.y + row;
                     const boardX = piece.x + col;
                     if (boardY >= 0 && boardY < ROWS && boardX >= 0 && boardX < COLS) {
-                        board[boardY][boardX] = piece.shape + 1;
+                        board[boardY][boardX] = piece.type + 1;
                     }
                 }
             }
@@ -171,7 +102,7 @@ const sketch = (p: p5) => {
                 board.splice(row, 1);
                 board.unshift(Array(COLS).fill(0));
                 cleared++;
-                row++; // Check same row again
+                row++;
             }
         }
         return cleared;
@@ -221,13 +152,13 @@ const sketch = (p: p5) => {
     }
 
     function drawPiece(piece: Piece, ghost: boolean = false): void {
-        const shape = getShape(piece);
+        const shape = getShape(piece.type, piece.rotation);
         for (let row = 0; row < shape.length; row++) {
             for (let col = 0; col < shape[row].length; col++) {
                 if (shape[row][col]) {
                     const y = piece.y + row;
                     if (y >= 0) {
-                        drawCell(piece.x + col, y, piece.shape + 1, ghost);
+                        drawCell(piece.x + col, y, piece.type + 1, ghost);
                     }
                 }
             }
@@ -236,7 +167,7 @@ const sketch = (p: p5) => {
 
     function drawGhost(piece: Piece): void {
         let ghostY = piece.y;
-        while (!collides({ ...piece, y: ghostY + 1 }, 0, 0, 0)) {
+        while (!collides({ ...piece, y: ghostY + 1 }, 0, 0)) {
             ghostY++;
         }
         if (ghostY !== piece.y) {
@@ -254,7 +185,7 @@ const sketch = (p: p5) => {
         p.textAlign(p.LEFT, p.TOP);
         p.text("NEXT", previewX, previewY - 15);
 
-        const shape = SHAPES[nextPiece][0];
+        const shape = getShape(nextPiece, 0);
         for (let row = 0; row < shape.length; row++) {
             for (let col = 0; col < shape[row].length; col++) {
                 if (shape[row][col]) {
@@ -296,7 +227,7 @@ const sketch = (p: p5) => {
         p.textAlign(p.CENTER, p.CENTER);
         p.text("FRIENDTRIS", WIDTH / 2, HEIGHT / 2 - 30);
         p.textSize(12);
-        p.text("Press START", WIDTH / 2, HEIGHT / 2 + 10);
+        p.text("Press P1", WIDTH / 2, HEIGHT / 2 + 10);
         p.textSize(10);
         p.text("LEFT/RIGHT: Move  DOWN: Soft drop", WIDTH / 2, HEIGHT / 2 + 40);
         p.text("UP: Hard drop  A/B: Rotate", WIDTH / 2, HEIGHT / 2 + 55);
@@ -314,7 +245,7 @@ const sketch = (p: p5) => {
         p.textSize(14);
         p.text("Score: " + score, WIDTH / 2, HEIGHT / 2 + 10);
         p.textSize(10);
-        p.text("Press START to retry", WIDTH / 2, HEIGHT / 2 + 40);
+        p.text("Press P1 to retry", WIDTH / 2, HEIGHT / 2 + 40);
     }
 
     function resetGame(): void {
@@ -323,7 +254,7 @@ const sketch = (p: p5) => {
         lines = 0;
         level = 1;
         gameOver = false;
-        nextPiece = Math.floor(p.random(SHAPES.length));
+        nextPiece = Math.floor(p.random(TETROMINOS.length));
         currentPiece = spawnPiece();
         lastFall = p.millis();
     }
@@ -331,7 +262,7 @@ const sketch = (p: p5) => {
     p.setup = () => {
         p.createCanvas(WIDTH, HEIGHT);
         board = createBoard();
-        nextPiece = Math.floor(p.random(SHAPES.length));
+        nextPiece = Math.floor(p.random(TETROMINOS.length));
     };
 
     p.draw = () => {
@@ -360,16 +291,17 @@ const sketch = (p: p5) => {
             return;
         }
 
-        // Handle horizontal movement (with repeat)
+        // Handle input
         if (currentPiece) {
+            // Horizontal movement (with repeat)
             if (PLAYER_1.DPAD.left && now - lastMove > moveDelay) {
-                if (!collides(currentPiece, -1, 0, 0)) {
+                if (!collides(currentPiece, -1, 0)) {
                     currentPiece.x--;
                     lastMove = now;
                 }
             }
             if (PLAYER_1.DPAD.right && now - lastMove > moveDelay) {
-                if (!collides(currentPiece, 1, 0, 0)) {
+                if (!collides(currentPiece, 1, 0)) {
                     currentPiece.x++;
                     lastMove = now;
                 }
@@ -377,41 +309,42 @@ const sketch = (p: p5) => {
 
             // Soft drop (hold down)
             if (PLAYER_1.DPAD.down && now - lastFall > 50) {
-                if (!collides(currentPiece, 0, 1, 0)) {
+                if (!collides(currentPiece, 0, 1)) {
                     currentPiece.y++;
                     lastFall = now;
                     score += 1;
                 }
             }
 
-            // Rotation (A = counter-clockwise, B = clockwise - edge triggered)
+            // Rotation with SRS wall kicks (A = CCW, B = CW)
             if (PLAYER_1.A && !prevA && now - lastRotate > rotateDelay) {
-                if (!collides(currentPiece, 0, 0, -1)) {
-                    currentPiece.rotation = (currentPiece.rotation + 3) % 4;
+                const rotated = tryRotate(board, currentPiece, -1);
+                if (rotated) {
+                    currentPiece = rotated;
                     lastRotate = now;
                 }
             }
             if (PLAYER_1.B && !prevB && now - lastRotate > rotateDelay) {
-                if (!collides(currentPiece, 0, 0, 1)) {
-                    currentPiece.rotation = (currentPiece.rotation + 1) % 4;
+                const rotated = tryRotate(board, currentPiece, 1);
+                if (rotated) {
+                    currentPiece = rotated;
                     lastRotate = now;
                 }
             }
 
             // Hard drop (UP - edge triggered)
             if (PLAYER_1.DPAD.up && !prevUp) {
-                while (!collides(currentPiece, 0, 1, 0)) {
+                while (!collides(currentPiece, 0, 1)) {
                     currentPiece.y++;
                     score += 2;
                 }
-                // Lock immediately
                 lockPiece(currentPiece);
                 const cleared = clearLines();
                 if (cleared > 0) {
                     updateScore(cleared);
                 }
                 currentPiece = spawnPiece();
-                if (collides(currentPiece, 0, 0, 0)) {
+                if (collides(currentPiece, 0, 0)) {
                     gameOver = true;
                 }
                 lastFall = now;
@@ -419,7 +352,7 @@ const sketch = (p: p5) => {
 
             // Natural falling
             if (now - lastFall > getFallSpeed()) {
-                if (!collides(currentPiece, 0, 1, 0)) {
+                if (!collides(currentPiece, 0, 1)) {
                     currentPiece.y++;
                 } else {
                     lockPiece(currentPiece);
@@ -428,7 +361,7 @@ const sketch = (p: p5) => {
                         updateScore(cleared);
                     }
                     currentPiece = spawnPiece();
-                    if (collides(currentPiece, 0, 0, 0)) {
+                    if (collides(currentPiece, 0, 0)) {
                         gameOver = true;
                     }
                 }
