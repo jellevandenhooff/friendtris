@@ -1,5 +1,6 @@
 import p5 from "p5";
 import { PLAYER_1, PLAYER_2, SYSTEM } from "@rcade/plugin-input-classic";
+import { PLAYER_2 as PLAYER_2_SPINNER } from "@rcade/plugin-input-spinners";
 import {
     TETROMINOS,
     COLORS,
@@ -52,8 +53,8 @@ const sketch = (p: p5) => {
     let prevP2B = false;
     let isMultiplayer = false;
 
-    // P2 mode: "pieces" = change next piece, "draw" = toggle cells
-    let p2Mode: "pieces" | "draw" = "pieces";
+    // P2 mode: "pieces" = change next piece, "draw" = toggle cells, "garbage" = add garbage rows
+    let p2Mode: "pieces" | "draw" | "garbage" = "pieces";
     let p2CursorX = Math.floor(COLS / 2);
     let p2CursorY = Math.floor(ROWS / 2);
 
@@ -243,29 +244,57 @@ const sketch = (p: p5) => {
             }
         }
 
-        // Mode indicators on the right (multiplayer only)
+        // P2 UI on the right (multiplayer only)
         if (isMultiplayer) {
+            const rightX = WIDTH - 10;
+            p.textAlign(p.RIGHT, p.TOP);
+            p.noStroke();
+
+            // P2 header
+            p.textSize(14);
+            p.fill(255);
+            p.text("P2", rightX, 10);
+
+            // PIECES header
+            p.textSize(10);
+            p.fill(p2Mode === "pieces" ? 255 : 80);
+            p.text("PIECES", rightX, 30);
+
+            // Piece preview or "?" for random
+            if (pieceMode === -1) {
+                p.textSize(20);
+                p.textAlign(p.CENTER, p.CENTER);
+                p.fill(p2Mode === "pieces" ? [100, 255, 100] : [50, 100, 50]);
+                p.text("?", rightX - 20, 65);
+            } else {
+                const pieceShape = getShape(pieceMode, 0);
+                const pieceColor = COLORS[pieceMode + 1];
+                const brightness = p2Mode === "pieces" ? 1.0 : 0.4;
+                const pieceStartX = rightX - 45;
+                const pieceStartY = 45;
+                for (let row = 0; row < pieceShape.length; row++) {
+                    for (let col = 0; col < pieceShape[row].length; col++) {
+                        if (pieceShape[row][col]) {
+                            p.fill(
+                                pieceColor[0] * brightness,
+                                pieceColor[1] * brightness,
+                                pieceColor[2] * brightness
+                            );
+                            p.rect(pieceStartX + col * 10, pieceStartY + row * 10, 9, 9);
+                        }
+                    }
+                }
+            }
+
+            // DRAW header
             p.textSize(10);
             p.textAlign(p.RIGHT, p.TOP);
-            const rightX = WIDTH - 10;
+            p.fill(p2Mode === "draw" ? [255, 100, 100] : 80);
+            p.text("DRAW", rightX, 100);
 
-            // P2 mode indicator
-            if (p2Mode === "draw") {
-                p.fill(255, 100, 100);
-                p.text("DRAW", rightX, previewY - 15);
-            } else {
-                p.fill(100, 100, 100);
-                p.text("PIECES", rightX, previewY - 15);
-            }
-
-            // Piece selection indicator
-            if (pieceMode === -1) {
-                p.fill(100, 255, 100);
-                p.text("RANDOM", rightX, previewY);
-            } else {
-                p.fill(255, 200, 100);
-                p.text("FIXED", rightX, previewY);
-            }
+            // GARBAGE header
+            p.fill(p2Mode === "garbage" ? [255, 200, 50] : 80);
+            p.text("GARBAGE", rightX, 115);
         }
     }
 
@@ -496,9 +525,13 @@ const sketch = (p: p5) => {
 
         // Player 2 sabotage (multiplayer only)
         if (isMultiplayer) {
-            // A button toggles P2 mode
-            if (PLAYER_2.A && !prevP2A) {
-                p2Mode = p2Mode === "pieces" ? "draw" : "pieces";
+            // Spinner switches P2 mode
+            const spinnerDelta = PLAYER_2_SPINNER.SPINNER.step_delta;
+            if (spinnerDelta !== 0) {
+                const modes: Array<"pieces" | "draw" | "garbage"> = ["pieces", "draw", "garbage"];
+                const currentIndex = modes.indexOf(p2Mode);
+                const direction = spinnerDelta > 0 ? 1 : -1;
+                p2Mode = modes[(currentIndex + direction + modes.length) % modes.length];
             }
 
             if (p2Mode === "pieces") {
@@ -513,8 +546,8 @@ const sketch = (p: p5) => {
                     if (pieceMode < -1) pieceMode = 6;
                     nextPiece = getNextPieceType();
                 }
-            } else {
-                // Draw mode: D-pad moves cursor, B toggles cell
+            } else if (p2Mode === "draw") {
+                // Draw mode: D-pad moves cursor, A/B toggles cell
                 if (PLAYER_2.DPAD.up && !prevP2Up) {
                     p2CursorY = Math.max(0, p2CursorY - 1);
                 }
@@ -527,9 +560,19 @@ const sketch = (p: p5) => {
                 if (PLAYER_2.DPAD.right && !prevP2Right) {
                     p2CursorX = Math.min(COLS - 1, p2CursorX + 1);
                 }
-                if (PLAYER_2.B && !prevP2B) {
+                if ((PLAYER_2.A && !prevP2A) || (PLAYER_2.B && !prevP2B)) {
                     // Toggle cell (use color 8 for P2-placed blocks)
                     board[p2CursorY][p2CursorX] = board[p2CursorY][p2CursorX] ? 0 : 8;
+                }
+            } else if (p2Mode === "garbage") {
+                // Garbage mode: A/B adds a garbage row
+                if ((PLAYER_2.A && !prevP2A) || (PLAYER_2.B && !prevP2B)) {
+                    // Remove top row, add garbage row at bottom
+                    board.shift();
+                    const holePosition = Math.floor(p.random(COLS));
+                    const garbageRow = Array(COLS).fill(8);
+                    garbageRow[holePosition] = 0;
+                    board.push(garbageRow);
                 }
             }
         }
